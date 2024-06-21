@@ -1,0 +1,321 @@
+import pandas as pd
+
+
+configfile: "config/config.yaml"
+
+
+PREFIX = config["root_dir"]
+ASSEMBLY = config.get("assembly", "GRCh38")
+SAMPLES_TABLE = pd.read_csv(config["samples"])
+samples = list(SAMPLES_TABLE["name"].values)
+sample_bam_dict = {
+    r.name: r.path for r in SAMPLES_TABLE.itertuples(index=False)
+}
+
+
+def get_missing_S6(wildcards):
+    _, computed_samples = glob_wildcards(
+        PREFIX + "/{assembly}/stringtie/S6/{sample_id}.tsv.gz"
+    )
+    missing_samples = list(set(samples) - set(computed_samples))
+    return expand(
+        PREFIX + "/{assembly}/stringtie/S6/{sample_id}.tsv.gz",
+        sample_id=missing_samples,
+        assembly=[ASSEMBLY],
+    )
+
+
+rule stringtie_all:
+    input: expand(PREFIX + "/{assembly}/stringtie/S1/{sample_id}.gtf.gz", assembly=[ASSEMBLY], sample_id=samples)
+
+
+localrules:
+    merge_exon_list,
+    merge_novel_exons,
+    aggregate_right_elements,
+    get_novel_bed,
+    intersect_novel_bed,
+    postprocess_novel_exons,
+    aggregate_novel_exons,
+    prepare_exons_and_genes_bed,
+    parse_annotation
+    # calculate_eCDF,
+
+
+rule parse_annotation:
+    input:
+        gtf= "resources/annotation/{assembly}/{assembly}.annotation.gtf",
+    output:
+        pq="resources/annotation/{assembly}/Annotation_parsed.pq",
+    conda:
+        "./envs/polars.yaml"
+    cache: True
+    shell:
+        """
+mkdir -p $(dirname {output.pq})  
+python -m workflow.scripts.parse_annotation_to_parquet \
+    --input {input.gtf} \
+    --output {output.pq} 
+"""
+
+rule prepare_exons_and_genes_bed:
+    input: 
+        gtf = ["resources/annotation/{assembly}/{assembly}.annotation.gtf"] + config['secondary_annotations']
+    output:
+        exons_bed = "resources/annotation/{assembly}/exons.bed",
+        genes_bed = "resources/annotation/{assembly}/protein_coding_genes.bed"
+    conda: "./envs/default.yaml"
+    shell: """
+cat {input.gtf} |\
+awk -v 'OFS=\t' '$3=="exon"' |\
+awk -v 'OFS=\t' '{{print $1,$4-1,$5}}' |\
+sort-bed - |\
+bedops -m - \
+> {output.exons_bed}
+
+cat {input.gtf} |\
+awk -v 'OFS=\t' '$3=="gene"' |\
+grep 'gene_type "protein_coding";' |\
+awk -v 'OFS=\t' '{{print $1,$4-1,$5}}' |\
+sort-bed - |\
+bedops -m - \
+> {output.genes_bed}
+"""
+
+rule stringtie:
+    input:
+        bam=lambda wildcards: sample_bam_dict[wildcards["sample_id"]],
+        gtf="resources/annotation/{assembly}/{assembly}.annotation.gtf",
+    output:
+        gtf=PREFIX + "/{assembly}/stringtie/S1/{sample_id}.gtf.gz",
+    threads: config["stringtie_threads"]
+    conda:
+        "./envs/stringtie.yaml"
+    shell:
+        """
+stringtie --conservative -G {input.gtf} -p {threads} {input.bam} | gzip > {output}
+"""
+
+
+rule read_and_filter_exons:
+    input:
+        gtf=rules.stringtie.output.gtf,
+        ipsa=PREFIX + "/{assembly}/pyIPSA/J6/{sample_id}.J6.gz",
+        ann_gtf="resources/annotation/{assembly}/Annotation_parsed.pq",
+    output:
+        tsv=PREFIX + "/{assembly}/stringtie/S6/{sample_id}.tsv.gz",
+    conda:
+        "./envs/polars.yaml"
+    resources:
+        mem_mb=15000 
+    shell:
+        """
+mkdir -p $(dirname {output.tsv})  
+python -m workflow.scripts.filter_exons \
+    --stringtie-gtf {input.gtf} \
+    --annotation-gtf {input.ann_gtf} \
+    --ipsa-junctions {input.ipsa} \
+    --output {output.tsv} \
+    --sample-name {wildcards.sample_id}
+"""
+
+
+rule merge_exon_list:
+    input:
+        tsv=lambda wildcards: expand(
+            PREFIX + "/{assembly}/stringtie/S6/{sample_id}.tsv.gz",
+            sample_id=samples,
+            assembly=[wildcards.assembly],
+        ),
+    output:
+        PREFIX + "/{assembly}/stringtie/S6.tmp.list",
+    run:
+        with open(output[0], "w") as out:
+            out.write("\n".join(input))
+
+
+rule merge_novel_exons:
+    input:
+        file_list=PREFIX + "/{assembly}/stringtie/S6.tmp.list",
+    output:
+        pq=PREFIX + "/{assembly}/stringtie/S6_merged.pq",
+    conda:
+        "./envs/polars.yaml"
+    shell:
+        """
+python -m workflow.scripts.merge_exon_files \
+    --input-list {input.file_list} \
+    --output {output.pq} \
+"""
+
+
+rule aggregate_right_elements:
+    input:
+        pq=PREFIX + "/{assembly}/stringtie/S6_merged.pq",
+    output:
+        pq=PREFIX + "/{assembly}/stringtie/S7.pq",
+    conda:
+        "./envs/polars.yaml"
+    log:
+        PREFIX + "/{assembly}/stringtie/S7.log",
+    shell:
+        """
+python -m workflow.scripts.aggregate_right_elements \
+    --input {input.pq} \
+    --output {output.pq} > {log}
+"""
+
+
+rule get_novel_bed:
+    input:
+        pq=PREFIX + "/{assembly}/stringtie/S7.pq",
+    output:
+        bed=PREFIX + "/{assembly}/stringtie/S7_novel.unsorted.bed",
+    conda:
+        "./envs/polars.yaml"
+    params:
+        radius=5,
+    shell:
+        """
+python -m workflow.scripts.get_novel_bed \
+    --radius {params.radius} \
+    --input {input.pq} \
+    --output {output.bed} 
+"""
+
+
+rule intersect_novel_bed:
+    input:
+        novel_bed=PREFIX + "/{assembly}/stringtie/S7_novel.unsorted.bed",
+        protein_coding="resources/annotation/{assembly}/protein_coding_genes.bed",
+        exons="resources/annotation/{assembly}/exons.bed",
+        cons_elements="resources/annotation/{assembly}/phastCons.{cons_type}.bed",
+    output:
+        bed=PREFIX + "/{assembly}/stringtie/S8/Annotated_{cons_type}.bed",
+    conda:
+        "./envs/default.yaml"
+    shell:
+        """
+cat {input.novel_bed} |\
+sort-bed - |\
+bedmap --delim $'\t' --echo --bases-uniq --bases-uniq-f - {input.exons} |\
+bedmap --delim $'\t' --echo --wmean --bases-uniq-f - {input.cons_elements}|\
+bedmap --delim $'\t' --fraction-ref 1 --echo --indicator - {input.protein_coding} \
+> {output}
+"""
+
+
+rule calculate_eCDF:
+    input:
+        bed=PREFIX + "/{assembly}/stringtie/S8/Annotated_{cons_type}.bed",
+        pq=PREFIX + "/{assembly}/stringtie/S7.pq",
+    output:
+        pq=PREFIX + "/{assembly}/stringtie/S9/Exons_w_eCDF_{cons_type}.pq",
+    log:
+        PREFIX + "/{assembly}/stringtie/S9/Exons_w_eCDF_{cons_type}.log",
+    conda:
+        "./envs/polars.yaml"
+    params:
+        max_as_length=150,
+    resources:
+        mem_mb=100000    
+    shell:
+        """
+python -m workflow.scripts.calculate_eCDF \
+    --input-pq {input.pq} \
+    --input-bed {input.bed} \
+    --max-as-length {params.max_as_length}\
+    --output {output.pq} > {log}
+"""
+
+
+rule postprocess_novel_exons:
+    input:
+        pq=PREFIX + "/{assembly}/stringtie/S9/Exons_w_eCDF_{cons_type}.pq",
+        ann_gtf="resources/annotation/{assembly}/Annotation_parsed.pq",
+        meta_csv=config["samples"],
+    output:
+        tsv=PREFIX
+        + "/{assembly}/stringtie/S10/Exons_table_{cons_type}_{q_expr}_{q_ce_cons}_{q_as_cons}.tsv",
+    log:
+        PREFIX
+        + "/{assembly}/stringtie/S10/Exons_postprocess_{cons_type}_{q_expr}_{q_ce_cons}_{q_as_cons}.log",
+    conda:
+        "./envs/polars.yaml"
+    params:
+        quantile_expr=lambda wildcards: int(wildcards.q_expr) / 100,
+        quantile_ce_cons=lambda wildcards: int(wildcards.q_ce_cons) / 100,
+        quantile_as_cons=lambda wildcards: int(wildcards.q_as_cons) / 100,
+    shell:
+        """
+python -m workflow.scripts.postprocess_exons \
+    --input-pq {input.pq} \
+    --input-ann {input.ann_gtf} \
+    --input-meta {input.meta_csv}\
+    --quantile-expr {params.quantile_expr}\
+    --quantile-ce-cons {params.quantile_ce_cons}\
+    --quantile-as-cons {params.quantile_as_cons}\
+    --output-table {output.tsv} > {log}
+"""
+
+
+rule aggregate_novel_exons:
+    input:
+        tsv=PREFIX
+        + "/{assembly}/stringtie/S10/Exons_table_{cons_type}_{q_expr}_{q_ce_cons}_{q_as_cons}.tsv",
+    output:
+        bed=PREFIX
+        + "/{assembly}/stringtie/S10/Exons_view_{cons_type}_{q_expr}_{q_ce_cons}_{q_as_cons}.bed",
+        tsv=PREFIX
+        + "/{assembly}/stringtie/S10/Exons_merged_table_{cons_type}_{q_expr}_{q_ce_cons}_{q_as_cons}.tsv",
+    conda:
+        "./envs/polars.yaml"
+    params:
+        track_name=f"NExon_{config['track_prefix']}",
+    shell:
+        """
+python -m workflow.scripts.aggregate_novel_exons \
+    --input {input.tsv}\
+    --output-bed {output.bed}\
+    --output-tsv {output.tsv}\
+    --track-name {params.track_name}
+"""
+
+
+rule all_novel_exons:
+    input:
+        tsv=lambda wildcards: expand(
+            PREFIX + "/{assembly}/stringtie/S6/{sample_id}.tsv.gz",
+            sample_id=samples,
+            assembly=[ASSEMBLY],
+        ),
+
+
+rule missing_novel_exons:
+    input:
+        get_missing_S6,
+
+
+rule final_multi_cons:
+    input:
+        expand(
+            PREFIX
+            + "/{assembly}/stringtie/S10/Exons_merged_table_{cons_type}_{q_expr}_{q_ce_cons}_{q_as_cons}.tsv",
+            assembly=[ASSEMBLY],
+            cons_type=["100Vertebrates", "30Primates", "470Mammals"],
+            q_expr=[config["thresholds"]["expr"]],
+            q_ce_cons=[config["thresholds"]["quantile_ce_cons"]],
+            q_as_cons=[config["thresholds"]["quantile_as_cons"]],
+        ),
+
+rule final:
+    input:
+        expand(
+            PREFIX
+            + "/{assembly}/stringtie/S10/Exons_merged_table_{cons_type}_{q_expr}_{q_ce_cons}_{q_as_cons}.tsv",
+            assembly=[ASSEMBLY],
+            cons_type=["100Vertebrates"],
+            q_expr=[config["thresholds"]["expr"]],
+            q_ce_cons=[config["thresholds"]["quantile_ce_cons"]],
+            q_as_cons=[config["thresholds"]["quantile_as_cons"]],
+        ),
