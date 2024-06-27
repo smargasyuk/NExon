@@ -15,6 +15,16 @@ sample_bam_dict = {
 print(PREFIX)
 
 
+rule final:
+    input:
+        expand(
+            PREFIX
+            + "/{assembly}/stringtie/S10/Exons_table_{cons_type}.tsv",
+            assembly=[ASSEMBLY],
+            cons_type=[config["conservation_file"]],
+        ),
+
+
 def get_missing_S6(wildcards):
     _, computed_samples = glob_wildcards(
         PREFIX + "/{assembly}/stringtie/S6/{sample_id}.tsv.gz"
@@ -274,14 +284,3 @@ rule all_novel_exons:
 rule missing_novel_exons:
     input:
         get_missing_S6,
-
-
-
-rule final:
-    input:
-        expand(
-            PREFIX
-            + "/{assembly}/stringtie/S10/Exons_table_{cons_type}.tsv",
-            assembly=[ASSEMBLY],
-            cons_type=[config["conservation_file"]],
-        ),
