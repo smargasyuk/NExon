@@ -10,17 +10,47 @@ def get_stats(df):
     )
 
 
+def read_gencode_introns(dfa):
+    dft = dfa.filter((pl.col('feature') == 'transcript') & (pl.col('transcript_type') == "protein_coding"))['transcript_id']
+    dfa2 = dfa\
+        .filter(
+            (pl.col('feature') == 'exon') & 
+            pl.col('transcript_id').is_in(dft))\
+        .sort(by=['transcript_id', 'start'])\
+        .with_columns(
+            pl.col("start").shift(-1).over("transcript_id").alias("coord_next"),
+            pl.col("end").shift(1).over("transcript_id").alias("coord_prev"),
+            pl.col('exon_number').cast(pl.Int16)
+        )\
+        .with_columns(
+            (pl.col('seqname') + "_" + pl.col('end').cast(str) + "_" + pl.col('coord_next').cast(str) + "_" + pl.col('strand') + "_").alias('intron_r')
+        )
+
+    return dfa2['intron_r']
+
+
+
 @click.command()
 @click.option("--input", required=True)
+@click.option("--annotation-pq", required=True)
 @click.option("--output", required=True)
-def main(input, output):
-    df1 = pl.read_parquet(input, use_pyarrow=True)
+def main(input, annotation_pq, output):
+    df1 = pl.read_parquet(input, use_pyarrow=True)\
+        .with_columns(
+        (pl.col('seqname') + "_" + pl.col('coord_prev').cast(str) + "_" + 
+         pl.col('coord_next').cast(str) + "_" + pl.col('strand') + "_").alias('junction_id_o')
+    )
+    dfa = pl.read_parquet(annotation_pq)
+    dfi = read_gencode_introns(dfa)
 
     print("Initial statistics:")
     print(get_stats(df1))
 
-    df1 = df1.filter(pl.col("is_annotated_right"))
-    print("After removal of non-annotated pairs:")
+    df1 = df1.filter(
+        pl.col("is_annotated_right") & 
+        (pl.col('junction_id_o').is_in(dfi) | pl.col('event_type').is_in(['AR', 'AL']))
+    )
+    print("After removal of non-annotated pairs and non-coding transcripts:")
     print(get_stats(df1))
 
     columns_groupby = [
@@ -38,6 +68,7 @@ def main(input, output):
         "coord_next",
         "junction_id_l",
         "junction_id_r",
+        "junction_id_o",
         "is_annotated_right",
         "cov",
         "ipsa_min",

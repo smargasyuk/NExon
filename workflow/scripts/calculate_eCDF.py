@@ -43,11 +43,8 @@ def main(input_pq, input_bed, max_as_length, output):
         "end",
         "exon_id",
         "event_type",
-        "ann_bp",
-        "ann_frac",
         "cons_wmean",
         "cons_cov",
-        "pc_gene_ind",
     ]
     dfc1 = pl.read_csv(
         input_bed,
@@ -63,10 +60,6 @@ def main(input_pq, input_bed, max_as_length, output):
         (pl.col("cons_wmean") * pl.col("cons_cov")).alias("cons_avg")
     ).filter(~pl.col("cons_avg").is_nan())
     print(f"Number of unique events in BED after removing non-conserved:")
-    print(get_eventtype_stats(dfc1))
-
-    dfc1 = dfc1.filter(pl.col("pc_gene_ind") == 1).drop("pc_gene_ind")
-    print(f"Number of unique events in BED after removing non-protein-coding:")
     print(get_eventtype_stats(dfc1))
 
     dfc1 = dfc1.filter(
@@ -85,7 +78,7 @@ def main(input_pq, input_bed, max_as_length, output):
     print(get_unique_event_stats(df2))
 
     df2 = df2.join(
-        dfc1.select("exon_id", "event_type", "cons_avg", "ann_frac"),
+        dfc1.select("exon_id", "event_type", "cons_avg"),
         on=["exon_id", "event_type"],
     )
     print(f"Number of unique events in full dataset after merge with BED data:")

@@ -1,0 +1,9 @@
+root_dir: '/path/to/files'
+track_prefix: 'NExon_track'
+samples: 'config/samples.csv'
+assembly: "GRCh38"
+
+stringtie_threads: 1
+
+conservation_file: "100Vertebrates"
+include_first_steps: yes

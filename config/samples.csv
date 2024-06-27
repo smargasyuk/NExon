@@ -1,0 +1,3 @@
+path,name,meta
+/path/to/file1/Aligned.sortedByCoord.out.bam,Sample1,con
+/path/to/file2/Aligned.sortedByCoord.out.bam,Sample2,exp
