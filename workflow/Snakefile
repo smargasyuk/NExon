@@ -19,7 +19,7 @@ rule final:
     input:
         expand(
             PREFIX
-            + "/{assembly}/stringtie/S10/Exons_table_{cons_type}.tsv",
+            + "/{assembly}/NExon/S10/Exons_table_{cons_type}.tsv",
             assembly=[ASSEMBLY],
             cons_type=[config["conservation_file"]],
         ),
@@ -27,18 +27,18 @@ rule final:
 
 def get_missing_S6(wildcards):
     _, computed_samples = glob_wildcards(
-        PREFIX + "/{assembly}/stringtie/S6/{sample_id}.tsv.gz"
+        PREFIX + "/{assembly}/NExon/S6/{sample_id}.tsv.gz"
     )
     missing_samples = list(set(samples) - set(computed_samples))
     return expand(
-        PREFIX + "/{assembly}/stringtie/S6/{sample_id}.tsv.gz",
+        PREFIX + "/{assembly}/NExon/S6/{sample_id}.tsv.gz",
         sample_id=missing_samples,
         assembly=[ASSEMBLY],
     )
 
 
 rule stringtie_all:
-    input: expand(PREFIX + "/{assembly}/stringtie/S1/{sample_id}.gtf.gz", assembly=[ASSEMBLY], sample_id=samples)
+    input: expand(PREFIX + "/{assembly}/NExon/S1/{sample_id}.gtf.gz", assembly=[ASSEMBLY], sample_id=samples)
 
 
 localrules:
@@ -50,8 +50,7 @@ localrules:
     aggregate_novel_exons,
     prepare_exons_and_genes_bed,
     parse_annotation
-    # calculate_eCDF,
-    #     aggregate_right_elements,
+
 
 
 rule parse_annotation:
@@ -76,7 +75,7 @@ if config["include_first_steps"]:
             bam=lambda wildcards: sample_bam_dict[wildcards["sample_id"]],
             gtf="resources/annotation/{assembly}/{assembly}.annotation.gtf",
         output:
-            gtf=PREFIX + "/{assembly}/stringtie/S1/{sample_id}.gtf.gz",
+            gtf=PREFIX + "/{assembly}/NExon/S1/{sample_id}.gtf.gz",
         threads: config["stringtie_threads"]
         conda:
             "./envs/stringtie.yaml"
@@ -92,7 +91,7 @@ if config["include_first_steps"]:
             ipsa=PREFIX + "/{assembly}/pyIPSA/J6/{sample_id}.J6.gz",
             ann_gtf="resources/annotation/{assembly}/Annotation_parsed.pq",
         output:
-            tsv=PREFIX + "/{assembly}/stringtie/S6/{sample_id}.tsv.gz",
+            tsv=PREFIX + "/{assembly}/NExon/S6/{sample_id}.tsv.gz",
         conda:
             "./envs/polars.yaml"
         resources:
@@ -112,12 +111,12 @@ if config["include_first_steps"]:
 rule merge_exon_list:
     input:
         tsv=lambda wildcards: expand(
-            PREFIX + "/{assembly}/stringtie/S6/{sample_id}.tsv.gz",
+            PREFIX + "/{assembly}/NExon/S6/{sample_id}.tsv.gz",
             sample_id=samples,
             assembly=[wildcards.assembly],
         ),
     output:
-        PREFIX + "/{assembly}/stringtie/S6.tmp.list",
+        PREFIX + "/{assembly}/NExon/S6.tmp.list",
     run:
         with open(output[0], "w") as out:
             out.write("\n".join(input))
@@ -125,9 +124,9 @@ rule merge_exon_list:
 
 rule merge_novel_exons:
     input:
-        file_list=PREFIX + "/{assembly}/stringtie/S6.tmp.list",
+        file_list=PREFIX + "/{assembly}/NExon/S6.tmp.list",
     output:
-        pq=PREFIX + "/{assembly}/stringtie/S6_merged.pq",
+        pq=PREFIX + "/{assembly}/NExon/S6_merged.pq",
     conda:
         "./envs/polars.yaml"
     shell:
@@ -140,16 +139,16 @@ python -m workflow.scripts.merge_exon_files \
 
 rule aggregate_right_elements:
     input:
-        pq=PREFIX + "/{assembly}/stringtie/S6_merged.pq",
+        pq=PREFIX + "/{assembly}/NExon/S6_merged.pq",
         anno="resources/annotation/{assembly}/Annotation_parsed.pq",
     output:
-        pq=PREFIX + "/{assembly}/stringtie/S7.pq",
+        pq=PREFIX + "/{assembly}/NExon/S7.pq",
     conda:
         "./envs/polars.yaml"
     resources:
         mem_mb=100000  
     log:
-        PREFIX + "/{assembly}/stringtie/S7.log",
+        PREFIX + "/{assembly}/NExon/S7.log",
     shell:
         """
 python -m workflow.scripts.aggregate_right_elements \
@@ -161,9 +160,9 @@ python -m workflow.scripts.aggregate_right_elements \
 
 rule get_novel_bed:
     input:
-        pq=PREFIX + "/{assembly}/stringtie/S7.pq",
+        pq=PREFIX + "/{assembly}/NExon/S7.pq",
     output:
-        bed=PREFIX + "/{assembly}/stringtie/S7_novel.unsorted.bed",
+        bed=PREFIX + "/{assembly}/NExon/S7_novel.unsorted.bed",
     conda:
         "./envs/polars.yaml"
     params:
@@ -179,10 +178,10 @@ python -m workflow.scripts.get_novel_bed \
 
 rule intersect_novel_bed:
     input:
-        novel_bed=PREFIX + "/{assembly}/stringtie/S7_novel.unsorted.bed",
+        novel_bed=PREFIX + "/{assembly}/NExon/S7_novel.unsorted.bed",
         cons_elements="resources/annotation/{assembly}/phastCons.{cons_type}.bed",
     output:
-        bed=PREFIX + "/{assembly}/stringtie/S8/Annotated_{cons_type}.bed",
+        bed=PREFIX + "/{assembly}/NExon/S8/Annotated_{cons_type}.bed",
     conda:
         "./envs/default.yaml"
     shell:
@@ -196,12 +195,12 @@ bedmap --delim $'\t' --echo --wmean --bases-uniq-f - {input.cons_elements}\
 
 rule calculate_eCDF:
     input:
-        bed=PREFIX + "/{assembly}/stringtie/S8/Annotated_{cons_type}.bed",
-        pq=PREFIX + "/{assembly}/stringtie/S7.pq",
+        bed=PREFIX + "/{assembly}/NExon/S8/Annotated_{cons_type}.bed",
+        pq=PREFIX + "/{assembly}/NExon/S7.pq",
     output:
-        pq=PREFIX + "/{assembly}/stringtie/S9/Exons_w_eCDF_{cons_type}.pq",
+        pq=PREFIX + "/{assembly}/NExon/S9/Exons_w_eCDF_{cons_type}.pq",
     log:
-        PREFIX + "/{assembly}/stringtie/S9/Exons_w_eCDF_{cons_type}.log",
+        PREFIX + "/{assembly}/NExon/S9/Exons_w_eCDF_{cons_type}.log",
     conda:
         "./envs/polars.yaml"
     params:
@@ -219,9 +218,9 @@ python -m workflow.scripts.calculate_eCDF \
 
 rule get_novel_bed_aux:
     input:
-        pq=PREFIX + "/{assembly}/stringtie/S9/Exons_w_eCDF_{cons_type}.pq",
+        pq=PREFIX + "/{assembly}/NExon/S9/Exons_w_eCDF_{cons_type}.pq",
     output:
-        bed=PREFIX + "/{assembly}/stringtie/S9/Exons_w_eCDF_{cons_type}.bed",
+        bed=PREFIX + "/{assembly}/NExon/S9/Exons_w_eCDF_{cons_type}.bed",
     conda:
         "./envs/polars.yaml"
     params:
@@ -236,10 +235,10 @@ python -m workflow.scripts.get_novel_bed \
 
 rule intersect_novel_bed_aux:
     input:
-        novel_bed=PREFIX + "/{assembly}/stringtie/S9/Exons_w_eCDF_{cons_type}.bed",
+        novel_bed=PREFIX + "/{assembly}/NExon/S9/Exons_w_eCDF_{cons_type}.bed",
         annotated_exons_bed="resources/annotation/{assembly}/exons.bed",
     output:
-        tsv=PREFIX + "/{assembly}/stringtie/S9/Annotated_{cons_type}.tsv",
+        tsv=PREFIX + "/{assembly}/NExon/S9/Annotated_{cons_type}.tsv",
     conda:
         "./envs/default.yaml"
     shell:
@@ -252,15 +251,15 @@ cut -f4,6 > {output}
 
 rule postprocess_novel_exons:
     input:
-        pq=PREFIX + "/{assembly}/stringtie/S9/Exons_w_eCDF_{cons_type}.pq",
-        ann_is=PREFIX + "/{assembly}/stringtie/S9/Annotated_{cons_type}.tsv",
+        pq=PREFIX + "/{assembly}/NExon/S9/Exons_w_eCDF_{cons_type}.pq",
+        ann_is=PREFIX + "/{assembly}/NExon/S9/Annotated_{cons_type}.tsv",
         meta_csv=config["samples"],
     output:
         tsv=PREFIX
-        + "/{assembly}/stringtie/S10/Exons_table_{cons_type}.tsv",
+        + "/{assembly}/NExon/S10/Exons_table_{cons_type}.tsv",
     log:
         PREFIX
-        + "/{assembly}/stringtie/S10/Exons_postprocess_{cons_type}.log",
+        + "/{assembly}/NExon/S10/Exons_postprocess_{cons_type}.log",
     conda:
         "./envs/polars.yaml"
     shell:
@@ -275,7 +274,7 @@ python -m workflow.scripts.postprocess_exons \
 rule all_novel_exons:
     input:
         tsv=lambda wildcards: expand(
-            PREFIX + "/{assembly}/stringtie/S6/{sample_id}.tsv.gz",
+            PREFIX + "/{assembly}/NExon/S6/{sample_id}.tsv.gz",
             sample_id=samples,
             assembly=[ASSEMBLY],
         ),

@@ -61,7 +61,9 @@ def main(
     meta_df = pl.read_csv(input_meta)
     df7 = df5.join(meta_df.select(['name', 'meta']), left_on="sample_name", right_on='name', how="left")
 
-    df7.write_csv(output_table, separator="\t")
+    df7\
+        .drop(['is_annotated', 'is_annotated_right', 'cov_right', 'start_right', 'end_right', 'novel_start', 'novel_end', 'ann_frac'])\
+        .write_csv(output_table, separator="\t")
 
 
 if __name__ == "__main__":

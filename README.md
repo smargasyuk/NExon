@@ -25,7 +25,7 @@ path,name,meta
 
 ### Directory structure
 
-The sample input files should be put into `bam` and `pyIPSA` subdirectories of `{root_dir}/{assembly}`. The pipeline generates files in `stringtie` subdirectory of `{root_dir}/{assembly}`:
+The sample input files should be put into `bam` and `pyIPSA` subdirectories of `{root_dir}/{assembly}`. The pipeline generates files in `NExon` subdirectory of `{root_dir}/{assembly}`:
 
 ```
 {root_dir}
@@ -39,7 +39,7 @@ The sample input files should be put into `bam` and `pyIPSA` subdirectories of `
     │       ├── {Sample1}.J6.gz
     │       ├── {Sample2}.J6.gz
     │       └── ...
-    └── stringtie
+    └── NExon
         ├── ...
         └── S10
            └── Exons_table_{conservation_file}.tsv
@@ -111,3 +111,18 @@ or
     snakemake --use-conda --drmaa --jobs 100
 
 See the [Snakemake documentation](https://snakemake.readthedocs.io/en/stable/executable.html) for further details.
+
+
+### Test data
+
+The pipeline can be run on the test dataset (chr20 data from RNA-Seq experiment for the A549 cell line treated with cycloheximide). To start the pipeline, run the following commands:
+
+    git clone https://github.com/smargasyuk/NExon.git
+    cd NExon
+    git checkout v0.1.0
+
+    wget https://zenodo.org/records/12636057/files/NExon_test_data.tar.gz
+    tar -xvf NExon_test_data.tar.gz
+    snakemake --use-conda --configfile test_data/GRCh38/NExon/config/config.yaml -c10
+
+The final output file will be created in `test_data/GRCh38/NExon/S10/Exons_table_100Vertebrates.tsv`, it should contain two events detected in `1_397_23_S5` sample.
