@@ -72,7 +72,7 @@ The pipeline outputs table `S10/Exons_table_{conservation_file}.tsv` that contai
 
     git clone https://github.com/smargasyuk/NExon.git
     cd NExon
-    git checkout v0.1.0
+    git checkout v0.2.0
 
 ### Step 2: Configure workflow
 
@@ -119,7 +119,7 @@ The pipeline can be run on the test dataset (chr20 data from RNA-Seq experiment 
 
     git clone https://github.com/smargasyuk/NExon.git
     cd NExon
-    git checkout v0.1.0
+    git checkout v0.2.0
 
     wget https://zenodo.org/records/12636057/files/NExon_test_data.tar.gz
     tar -xvf NExon_test_data.tar.gz
